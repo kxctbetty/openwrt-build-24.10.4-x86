@@ -4,9 +4,9 @@ on:
   workflow_dispatch:  # 仅手动触发编译，避免自动执行
 
 env:
-  # 源码配置（指定24.10.4 Tag，确认官方存在）
+  # 源码配置（修正为官方标准Tag：v24.10.4）
   SOURCE_URL: https://github.com/openwrt/openwrt.git
-  SOURCE_BRANCH: openwrt-24.10.4
+  SOURCE_BRANCH: v24.10.4
   CLONE_DEPTH: 1  # Tag克隆深度设为1，加速源码拉取
   # 文件路径配置（与前文创建的文件路径严格对应）
   CONFIG_FILE: configs/for_openwrt2410.4/x86_64.config
@@ -88,10 +88,10 @@ jobs:
           mkdir -p $CCACHE_DIR
           chmod 777 $CCACHE_DIR
 
-      - name: 克隆OpenWRT 24.10.4源码（适配Tag，增加兜底逻辑）
+      - name: 克隆OpenWRT 24.10.4源码（适配官方Tag：v24.10.4，增加兜底逻辑）
         id: clone
         run: |
-          # 核心修正：适配Tag克隆（而非分支），增加兜底
+          # 核心修正：适配官方Tag v24.10.4，增加兜底
           git clone --depth $CLONE_DEPTH --single-branch -b $SOURCE_BRANCH $SOURCE_URL workspace/openwrt || {
               echo "Direct clone Tag failed, fallback to checkout Tag after clone"
               git clone --depth $CLONE_DEPTH $SOURCE_URL workspace/openwrt
