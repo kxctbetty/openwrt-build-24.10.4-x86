@@ -368,7 +368,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.OPENWRT_ROOT_PATH }}/dl
-          key: ${{ runner.os }}-openwrt-dl-24.10.4-${{ hashFiles('**/feeds.conf.default') }}
+          key: ${{ runner.os }}-openwrt-dl-24.10.4-${{ hashFiles('scripts/feeds.sh') }}  # 改成存在的文件
           restore-keys: |
             ${{ runner.os }}-openwrt-dl-24.10.4-
             ${{ runner.os }}-openwrt-dl-
