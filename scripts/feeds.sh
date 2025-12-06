@@ -18,6 +18,15 @@ if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/op
     git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 fi
 
+## 新增：移除kenzo里不兼容的xray-core，替换为v24.10.4兼容版本（核心修复）
+rm -rf feeds/kenzo/net/xray-core  # 删除不兼容版本
+mkdir -p feeds/kenzo/net/xray-core
+if ! git clone --depth 1 --single-branch -b v1.8.10 https://github.com/XTLS/Xray-core.git feeds/kenzo/net/xray-core; then
+    echo "首次拉取兼容版xray-core失败，重试1次..."
+    rm -rf feeds/kenzo/net/xray-core
+    git clone --depth 1 --single-branch -b v1.8.10 https://github.com/XTLS/Xray-core.git feeds/kenzo/net/xray-core
+fi
+
 ## 拉取kenzo small包（依赖补充）
 mkdir -p feeds/small
 if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/small.git feeds/small; then
