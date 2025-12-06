@@ -18,11 +18,10 @@ gzip
 libc6-dev
 libelf-dev
 libffi-dev
-libgmp3-dev
+libgmp-dev
 liblzma-dev
-libncurses5-dev
+libncurses-dev
 libncursesw5-dev
-libopenssl-dev
 libpcre3-dev
 libreadline-dev
 libssl-dev
