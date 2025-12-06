@@ -9,26 +9,26 @@ cd "$OPENWRT_ROOT_PATH" || { echo "OpenWRT根目录不存在"; exit 1; }
 cp -f feeds.conf.default feeds.conf.default.bak
 sed -i '/kenzo\|small\|argon\|ikoolproxy/d' feeds.conf.default
 
-# ====================== 适配v24.10.4：克隆Feeds（使用main分支，自动兼容） ======================
-# 1. kenzo包（main分支，兼容v24.10.4）
+# ====================== 适配v24.10.4：克隆Feeds（修正分支名为master） ======================
+# 1. kenzo包（默认分支是master，兼容v24.10.4）
 mkdir -p feeds/kenzo
-git clone --depth 1 --single-branch -b main https://github.com/kenzok8/openwrt-packages.git feeds/kenzo || {
-    rm -rf feeds/kenzo && git clone --depth 1 --single-branch -b main https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
+git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo || {
+    rm -rf feeds/kenzo && git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 }
 
-# 2. small包（main分支，兼容v24.10.4）
+# 2. small包（默认分支是master，兼容v24.10.4）
 mkdir -p feeds/small
-git clone --depth 1 --single-branch -b main https://github.com/kenzok8/small.git feeds/small || {
-    rm -rf feeds/small && git clone --depth 1 --single-branch -b main https://github.com/kenzok8/small.git feeds/small
+git clone --depth 1 --single-branch -b master https://github.com/kenzok8/small.git feeds/small || {
+    rm -rf feeds/small && git clone --depth 1 --single-branch -b master https://github.com/kenzok8/small.git feeds/small
 }
 
-# 3. Argon主题（main分支，适配v24.10.4）
+# 3. Argon主题（适配v24.10.4）
 mkdir -p feeds/argon
 git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git feeds/argon || {
     rm -rf feeds/argon && git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git feeds/argon
 }
 
-# 4. iKoolProxy（本地包，适配v24.10.4）
+# 4. iKoolProxy（本地包）
 mkdir -p package/luci-app-ikoolproxy
 git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy || {
     rm -rf package/luci-app-ikoolproxy && git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy
