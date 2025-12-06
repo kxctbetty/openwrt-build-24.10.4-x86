@@ -18,7 +18,7 @@ env:
   IMAGE_NAME: Firmware-x86_64-openwrt-24.10.4
   TOOLCHAIN_TAG: toolchain-x86_64-openwrt-24.10.4
   TOOLCHAIN_NAME: Toolchain-x86_64-openwrt-24.10.4
-  # 上传开关
+  # 上传开关（开启Release上传）
   TOOLCHAIN_RELEASE_UPLOAD: true
   FIRMWARE_RELEASE_UPLOAD: true
   # 磁盘扩容（避免空间不足）
@@ -53,7 +53,7 @@ jobs:
       - name: 拉取仓库配置文件
         uses: actions/checkout@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
 
       - name: 清理磁盘空间（释放Ubuntu Runner空间）
         env:
@@ -201,7 +201,7 @@ jobs:
       - name: 删除旧工具链Release
         if: env.TOOLCHAIN_RELEASE_UPLOAD == 'true' && steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
         run: |
           assets=$(gh release view "$TOOLCHAIN_TAG" --json "assets" --jq ".assets.[].name" 2>/dev/null || true)
           if [ ! -z "$assets" ]; then
@@ -215,7 +215,7 @@ jobs:
       - name: 上传工具链到Release
         if: env.TOOLCHAIN_RELEASE_UPLOAD == 'true' && steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
           NOTES: Toolchain for OpenWRT 24.10.4 x86_64 (${{ env.BUILD_DATE }})
         run: |
           assets=$(ls "$TOOLCHAIN_OUTPUT" 2>/dev/null || true)
@@ -438,7 +438,7 @@ jobs:
       - name: 拉取仓库文件
         uses: actions/checkout@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
 
       - name: 下载固件压缩包
         uses: actions/download-artifact@v6
@@ -460,7 +460,7 @@ jobs:
 
       - name: 删除旧固件Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
         run: |
           assets=$(gh release view "$IMAGE_TAG" --json "assets" --jq ".assets.[].name" 2>/dev/null || true)
           if [ ! -z "$assets" ]; then
@@ -473,7 +473,7 @@ jobs:
 
       - name: 上传固件到Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # 替换为GH_PAT
           NOTES: |
             OpenWRT 24.10.4 x86_64 固件（${{ env.BUILD_DATE }}）
             核心插件：open-vm-tools、iKoolProxy（ilxp仓库）、DDNS、msd_lite、Passwall2、BBR、Cake/FQ、Argon主题
