@@ -1,0 +1,477 @@
+name: Build openwrt-24.10.4 for x86_64
+
+on:
+  workflow_dispatch:  # 仅手动触发编译，避免自动执行
+
+env:
+  # 源码配置（指定24.10.4 Tag）
+  SOURCE_URL: https://github.com/openwrt/openwrt.git
+  SOURCE_BRANCH: openwrt-24.10.4
+  CLONE_DEPTH: 1  # Tag克隆深度设为1，加速源码拉取
+  # 文件路径配置（与前文创建的文件路径严格对应）
+  CONFIG_FILE: configs/for_openwrt2410.4/x86_64.config
+  DIY_SH: scripts/diy.sh
+  FIX_SH: scripts/fix.sh
+  FEEDS_SH: scripts/feeds.sh
+  # 发布标签配置
+  IMAGE_TAG: firmware-x86_64-openwrt-24.10.4
+  IMAGE_NAME: Firmware-x86_64-openwrt-24.10.4
+  TOOLCHAIN_TAG: toolchain-x86_64-openwrt-24.10.4
+  TOOLCHAIN_NAME: Toolchain-x86_64-openwrt-24.10.4
+  # 上传开关
+  TOOLCHAIN_RELEASE_UPLOAD: true
+  FIRMWARE_RELEASE_UPLOAD: true
+  # 磁盘扩容（避免空间不足）
+  COMBINE_DISK: true
+  # 时区与缓存配置
+  TZ: Asia/Shanghai
+  CCACHE_DIR: /home/runner/.ccache  # ccache缓存目录
+  CCACHE_SIZE: 50G  # ccache缓存大小
+
+jobs:
+  # 第一步：编译工具链（复用缓存，加速后续编译）
+  Toolchain:
+    runs-on: ubuntu-22.04
+    outputs:
+      OPENWRT_ROOT_PATH: ${{ steps.clone.outputs.OPENWRT_ROOT_PATH }}
+      TOOLCHAIN_OUTPUT: ${{ steps.clone.outputs.TOOLCHAIN_OUTPUT }}
+      CURRENT_BRANCH: ${{ steps.env.outputs.CURRENT_BRANCH }}
+      SOURCE_OWNER: ${{ steps.env.outputs.SOURCE_OWNER }}
+      SOURCE_REPO: ${{ steps.env.outputs.SOURCE_REPO }}
+      DEVICE_PLATFORM: ${{ steps.env.outputs.DEVICE_PLATFORM }}
+      DEVICE_TARGET: ${{ steps.env.outputs.DEVICE_TARGET }}
+      DEVICE_SUBTARGET: ${{ steps.env.outputs.DEVICE_SUBTARGET }}
+      TOOLCHAIN_IMAGE: ${{ steps.env.outputs.TOOLCHAIN_IMAGE }}
+      BUILD_DATE: ${{ steps.env.outputs.BUILD_DATE }}
+
+    steps:
+      - name: 初始化Git配置
+        run: |
+          git config --global init.defaultBranch main
+          git config --global advice.detachedHead false
+
+      - name: 拉取仓库配置文件
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 清理磁盘空间（释放Ubuntu Runner空间）
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq -y purge ghc* zulu* google* dotnet* mysql* php apache2 azure-cli firefox powershell
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get -y clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          docker image prune -a -f
+
+      - name: 安装编译依赖
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq -y upgrade
+          sudo -E apt-get -y install $(cat $GITHUB_WORKSPACE/openwrt-env)
+          sudo -E apt-get -y install ccache  # 安装ccache缓存工具
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get -y clean
+          sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+          mkdir workspace
+          # 配置ccache
+          ccache -M $CCACHE_SIZE
+          mkdir -p $CCACHE_DIR
+          chmod 777 $CCACHE_DIR
+
+      - name: 克隆OpenWRT 24.10.4源码
+        id: clone
+        run: |
+          git clone --depth $CLONE_DEPTH -b $SOURCE_BRANCH $SOURCE_URL workspace/openwrt
+          cd workspace/openwrt
+          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
+          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
+
+          mkdir -p $GITHUB_WORKSPACE/output
+          cd $GITHUB_WORKSPACE/output
+          export TOOLCHAIN_OUTPUT="$(pwd)"
+          echo "TOOLCHAIN_OUTPUT=$TOOLCHAIN_OUTPUT" >> $GITHUB_ENV
+          echo "TOOLCHAIN_OUTPUT=$TOOLCHAIN_OUTPUT" >> $GITHUB_OUTPUT
+
+      - name: 生成工具链配置文件
+        run: |
+          cp $CONFIG_FILE $OPENWRT_ROOT_PATH/.config
+          echo -e "\nCONFIG_ALL=y" >> $OPENWRT_ROOT_PATH/.config
+          echo -e "\nCONFIG_ALL_NONSHARED=y" >> $OPENWRT_ROOT_PATH/.config
+          cd $OPENWRT_ROOT_PATH
+          make defconfig > /dev/null 2>&1
+
+      - name: 生成编译变量
+        id: env
+        run: |
+          cd $GITHUB_WORKSPACE
+          export CURRENT_BRANCH="$(git symbolic-ref --short HEAD)"
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+
+          cd $OPENWRT_ROOT_PATH
+          export SOURCE_OWNER="$(echo $SOURCE_URL | awk -F '/' '{print $(NF-1)}')"
+          echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_ENV
+          echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_OUTPUT
+
+          export SOURCE_REPO="$(echo $SOURCE_URL | awk -F '/' '{print $(NF)}')"
+          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
+
+          export DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
+          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_OUTPUT
+
+          export DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
+
+          export DEVICE_PLATFORM=$(cat .config | grep CONFIG_TARGET_ARCH_PACKAGES | awk -F '"' '{print $2}')
+          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_ENV
+          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_OUTPUT
+
+          export TOOLCHAIN_IMAGE="toolchain-$DEVICE_TARGET-$DEVICE_SUBTARGET"
+          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
+          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
+
+          export BUILD_DATE=$(date +"%Y-%m-%d")
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
+
+      - name: 对比工具链哈希（判断是否复用缓存）
+        id: hash
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
+          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
+          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
+          echo "CURRENT_HASH is $CURRENT_HASH"
+          export CACHE_HASH=$(curl -fSsL https://github.com/$GITHUB_REPOSITORY/releases/download/$TOOLCHAIN_TAG/$TOOLCHAIN_IMAGE.hash 2>/dev/null || true)
+          echo "CACHE_HASH is $CACHE_HASH"
+          if [ -z "$CACHE_HASH" ] || [ "$CURRENT_HASH" != "$CACHE_HASH" ]; then
+            echo "REBUILD_TOOLCHAIN=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 编译工具（启用ccache加速）
+        if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          export PATH=/usr/lib/ccache:$PATH
+          echo "$(nproc) threads compile tools"
+          make tools/compile -j$(nproc) V=s
+
+      - name: 编译工具链（启用ccache加速）
+        if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          export PATH=/usr/lib/ccache:$PATH
+          echo "$(nproc) threads compile toolchain"
+          make toolchain/compile -j$(nproc) V=s
+          rm -rf .config* dl bin
+
+      - name: 生成工具链镜像
+        if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+        run: |
+          cd workspace
+          mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd
+          mkdir -p $GITHUB_WORKSPACE/output
+          split -d -b 1900M $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
+          rm $TOOLCHAIN_IMAGE
+          cd $OPENWRT_ROOT_PATH
+          echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
+
+      - name: 删除旧工具链Release
+        if: env.TOOLCHAIN_RELEASE_UPLOAD == 'true' && steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=$(gh release view "$TOOLCHAIN_TAG" --json "assets" --jq ".assets.[].name" 2>/dev/null || true)
+          if [ ! -z "$assets" ]; then
+            echo -e "Delete old toolchain assets:\n$assets"
+            for asset in $assets; do
+              gh release delete-asset "$TOOLCHAIN_TAG" $asset --yes
+            done
+            gh release delete "$TOOLCHAIN_TAG" --cleanup-tag --yes 2>/dev/null || true
+          fi
+
+      - name: 上传工具链到Release
+        if: env.TOOLCHAIN_RELEASE_UPLOAD == 'true' && steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: Toolchain for OpenWRT 24.10.4 x86_64 (${{ env.BUILD_DATE }})
+        run: |
+          assets=$(ls "$TOOLCHAIN_OUTPUT" 2>/dev/null || true)
+          if [ ! -z "$assets" ]; then
+            # 重试创建Release（避免网络问题）
+            for ctry in `seq 1 30`; do
+              sleep 5
+              gh release create "$TOOLCHAIN_TAG" --title "$TOOLCHAIN_NAME" --notes "$NOTES" --target "$GITHUB_SHA" 2>egrc || true
+              egrc=$(<egrc)
+              if [ -z "$egrc" ]; then break; fi
+              echo "Retry create release (${ctry}/30): $egrc"
+              gh release delete "$TOOLCHAIN_TAG" --cleanup-tag --yes 2>/dev/null || true
+            done
+            # 上传工具链文件
+            for asset in $assets; do
+              gh release upload --clobber "$TOOLCHAIN_TAG" "$TOOLCHAIN_OUTPUT/$asset"
+              echo "Uploaded: $asset"
+            done
+          fi
+
+  # 第二步：编译固件（复用工具链缓存）
+  Build:
+    needs: [Toolchain]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 合并磁盘扩容（避免编译空间不足）
+        if: env.COMBINE_DISK == 'true'
+        run: |
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          ROOT_FREE_KB=$(df --block-size=1024 --output=avail / | tail -1)
+          ROOT_LOOP_KB=$((ROOT_FREE_KB - 1048576))
+          ROOT_LOOP_BYTES=$((ROOT_LOOP_KB * 1024))
+          sudo fallocate -l $ROOT_LOOP_BYTES /root.img
+          ROOT_LOOP_DEVNAME=$(sudo losetup -Pf --show /root.img)
+          sudo pvcreate -f $ROOT_LOOP_DEVNAME
+          
+          MNT_FREE_KB=$(df --block-size=1024 --output=avail /mnt | tail -1)
+          MNT_LOOP_KB=$((MNT_FREE_KB - 102400))
+          MNT_LOOP_BYTES=$((MNT_LOOP_KB * 1024))
+          sudo fallocate -l $MNT_LOOP_BYTES /mnt/mnt.img
+          MNT_LOOP_DEVNAME=$(sudo losetup -Pf --show /mnt/mnt.img)
+          sudo pvcreate -f $MNT_LOOP_DEVNAME
+          
+          sudo vgcreate vgstorage $ROOT_LOOP_DEVNAME $MNT_LOOP_DEVNAME
+          sudo lvcreate -n lvstorage -l 100%FREE vgstorage
+          LV_DEVNAME=$(sudo lvscan | awk -F "'" '{print $2}')
+          sudo mkfs.btrfs -L combinedisk $LV_DEVNAME
+          sudo mount -o compress=zstd $LV_DEVNAME $GITHUB_WORKSPACE
+          sudo chown -R runner:runner $GITHUB_WORKSPACE
+          mkdir -p $GITHUB_WORKSPACE/tmp
+          chmod 0777 $GITHUB_WORKSPACE/tmp
+          sudo cp -rp /tmp/* $GITHUB_WORKSPACE/tmp
+          sudo mount -B $GITHUB_WORKSPACE/tmp /tmp
+          df -hT $GITHUB_WORKSPACE
+
+      - name: 恢复编译变量
+        run: |
+          git config --global init.defaultBranch main
+          git config --global advice.detachedHead false
+          echo "CURRENT_BRANCH=${{needs.Toolchain.outputs.CURRENT_BRANCH}}" >> $GITHUB_ENV
+          echo "OPENWRT_ROOT_PATH=${{needs.Toolchain.outputs.OPENWRT_ROOT_PATH}}" >> $GITHUB_ENV
+          echo "SOURCE_OWNER=${{needs.Toolchain.outputs.SOURCE_OWNER}}" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{needs.Toolchain.outputs.SOURCE_REPO}}" >> $GITHUB_ENV
+          echo "DEVICE_PLATFORM=${{needs.Toolchain.outputs.DEVICE_PLATFORM}}" >> $GITHUB_ENV
+          echo "DEVICE_TARGET=${{needs.Toolchain.outputs.DEVICE_TARGET}}" >> $GITHUB_ENV
+          echo "DEVICE_SUBTARGET=${{needs.Toolchain.outputs.DEVICE_SUBTARGET}}" >> $GITHUB_ENV
+          echo "TOOLCHAIN_IMAGE=${{needs.Toolchain.outputs.TOOLCHAIN_IMAGE}}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${{needs.Toolchain.outputs.BUILD_DATE}}" >> $GITHUB_ENV
+
+      - name: 拉取仓库配置文件
+        run: |
+          cd $GITHUB_WORKSPACE
+          git init
+          git remote add origin https://github.com/$GITHUB_REPOSITORY
+          git fetch --depth 1 origin $GITHUB_REF
+          git checkout -t origin/$CURRENT_BRANCH
+
+      - name: 清理磁盘空间
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq -y purge ghc* zulu* google* dotnet* mysql* php apache2 azure-cli firefox powershell
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get -y clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          docker image prune -a -f
+
+      - name: 安装编译依赖
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq -y upgrade
+          sudo -E apt-get -y install $(cat $GITHUB_WORKSPACE/openwrt-env)
+          sudo -E apt-get -y install ccache
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get -y clean
+          sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+          mkdir workspace
+          ccache -M $CCACHE_SIZE
+          mkdir -p $CCACHE_DIR
+          chmod 777 $CCACHE_DIR
+
+      - name: 下载工具链镜像
+        run: |
+          cd workspace
+          for i in {0..9}; do
+            curl -fsL --retry 10 https://github.com/$GITHUB_REPOSITORY/releases/download/$TOOLCHAIN_TAG/$TOOLCHAIN_IMAGE.img.0$i >> $TOOLCHAIN_IMAGE.img || break
+          done
+          mkdir openwrt-ro openwrt workdir overlay
+          sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
+          sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
+          cd $OPENWRT_ROOT_PATH
+          git pull
+
+      - name: 加载自定义Feeds
+        run: |
+          cp $GITHUB_WORKSPACE/$FEEDS_SH $OPENWRT_ROOT_PATH/$FEEDS_SH
+          chmod +x $OPENWRT_ROOT_PATH/$FEEDS_SH
+          cd $OPENWRT_ROOT_PATH
+          ./$FEEDS_SH
+
+      - name: 安装Feeds包
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          ./scripts/feeds clean
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 加载自定义配置与修复脚本
+        run: |
+          cp $GITHUB_WORKSPACE/$DIY_SH $OPENWRT_ROOT_PATH/$DIY_SH
+          cp $GITHUB_WORKSPACE/$FIX_SH $OPENWRT_ROOT_PATH/$FIX_SH
+          cp $GITHUB_WORKSPACE/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
+          chmod +x $OPENWRT_ROOT_PATH/$DIY_SH
+          chmod +x $OPENWRT_ROOT_PATH/$FIX_SH
+          cd $OPENWRT_ROOT_PATH
+          ./$FIX_SH
+          ./$DIY_SH
+          make defconfig
+
+      - name: 缓存下载的包源码（dl目录）
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OPENWRT_ROOT_PATH }}/dl
+          key: ${{ runner.os }}-openwrt-dl-24.10.4-${{ hashFiles('**/feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-24.10.4-
+            ${{ runner.os }}-openwrt-dl-
+
+      - name: 下载包源码（带重试）
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          for i in 1 2 3; do
+            make download -j8 && break
+            echo "Download failed, retry $i/3..."
+            sleep 10
+          done
+          df -hT
+
+      - name: 编译软件包（启用ccache）
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          export PATH=/usr/lib/ccache:$PATH
+          echo "$(nproc) threads compile packages"
+          make target/compile -j$(nproc) IGNORE_ERRORS="m n" V=s
+          make package/kernel/button-hotplug/compile -j$(nproc) V=s
+          make package/compile -j$(nproc) IGNORE_ERRORS="m n" V=s
+          make package/index V=s
+
+      - name: 生成固件
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          export PATH=/usr/lib/ccache:$PATH
+          make package/install -j$(nproc) || make package/install -j1 V=s
+          make target/install -j$(nproc) || make target/install -j1 V=s
+          make json_overview_image_info V=s
+          make checksum V=s
+
+      - name: 打印固件信息
+        run: |
+          cd $OPENWRT_ROOT_PATH/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET
+          echo "Firmware files:"
+          ls -lh
+          echo -e "\nSHA256 sums:"
+          cat sha256sums
+
+      - name: 压缩固件目录
+        run: |
+          cd $OPENWRT_ROOT_PATH
+          zip -r $DEVICE_TARGET-$DEVICE_SUBTARGET.zip bin
+          mv $DEVICE_TARGET-$DEVICE_SUBTARGET.zip $GITHUB_WORKSPACE/
+
+      - name: 上传固件压缩包到Artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: openwrt-24.10.4-x86_64-bin
+          path: ${{ github.workspace }}/${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.zip
+
+  # 第三步：上传固件到Release
+  Upload:
+    needs: [Build, Toolchain]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 恢复变量
+        run: |
+          echo "CURRENT_BRANCH=${{needs.Toolchain.outputs.CURRENT_BRANCH}}" >> $GITHUB_ENV
+          echo "OPENWRT_ROOT_PATH=${{needs.Toolchain.outputs.OPENWRT_ROOT_PATH}}" >> $GITHUB_ENV
+          echo "DEVICE_TARGET=${{needs.Toolchain.outputs.DEVICE_TARGET}}" >> $GITHUB_ENV
+          echo "DEVICE_SUBTARGET=${{needs.Toolchain.outputs.DEVICE_SUBTARGET}}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${{needs.Toolchain.outputs.BUILD_DATE}}" >> $GITHUB_ENV
+
+      - name: 拉取仓库文件
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 下载固件压缩包
+        uses: actions/download-artifact@v6
+        with:
+          name: openwrt-24.10.4-x86_64-bin
+          path: ${{ github.workspace }}
+
+      - name: 解压固件包
+        run: |
+          cd $GITHUB_WORKSPACE
+          unzip -q $DEVICE_TARGET-$DEVICE_SUBTARGET.zip
+
+      - name: 整理固件文件
+        run: |
+          cd $GITHUB_WORKSPACE/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET
+          rm -rf packages
+          echo "Final firmware files:"
+          ls -lh
+
+      - name: 删除旧固件Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=$(gh release view "$IMAGE_TAG" --json "assets" --jq ".assets.[].name" 2>/dev/null || true)
+          if [ ! -z "$assets" ]; then
+            echo -e "Delete old firmware assets:\n$assets"
+            for asset in $assets; do
+              gh release delete-asset "$IMAGE_TAG" $asset --yes
+            done
+            gh release delete "$IMAGE_TAG" --cleanup-tag --yes 2>/dev/null || true
+          fi
+
+      - name: 上传固件到Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: |
+            OpenWRT 24.10.4 x86_64 固件（${{ env.BUILD_DATE }}）
+            核心插件：open-vm-tools、iKoolProxy（ilxp仓库）、DDNS、msd_lite、Passwall、BBR、Cake/FQ、Argon主题
+            语言：默认中文
+            固件格式：ISO/IMG/VMDK（适配VMware/Proxmox/物理机）
+        run: |
+          FIRMWARE_DIR="$GITHUB_WORKSPACE/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET"
+          assets=$(ls "$FIRMWARE_DIR" 2>/dev/null || true)
+          if [ ! -z "$assets" ]; then
+            for ctry in `seq 1 30`; do
+              sleep 5
+              gh release create "$IMAGE_TAG" --title "$IMAGE_NAME" --notes "$NOTES" --target "$GITHUB_SHA" 2>egrc || true
+              egrc=$(<egrc)
+              if [ -z "$egrc" ]; then break; fi
+              echo "Retry create release (${ctry}/30): $egrc"
+              gh release delete "$IMAGE_TAG" --cleanup-tag --yes 2>/dev/null || true
+            done
+            for asset in $assets; do
+              gh release upload --clobber "$IMAGE_TAG" "$FIRMWARE_DIR/$asset"
+              echo "Uploaded firmware: $asset"
+            done
+          fi
