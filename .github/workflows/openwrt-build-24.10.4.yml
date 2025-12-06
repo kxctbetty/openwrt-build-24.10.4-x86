@@ -4,7 +4,7 @@ on:
   workflow_dispatch:  # 仅手动触发编译，避免自动执行
 
 env:
-  # 源码配置（指定24.10.4 Tag）
+  # 源码配置（指定24.10.4 Tag，确认官方存在）
   SOURCE_URL: https://github.com/openwrt/openwrt.git
   SOURCE_BRANCH: openwrt-24.10.4
   CLONE_DEPTH: 1  # Tag克隆深度设为1，加速源码拉取
@@ -66,13 +66,19 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           docker image prune -a -f
 
-      - name: 安装编译依赖
+      - name: 安装编译依赖（修复包名错误）
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get -qq -y upgrade
-          sudo -E apt-get -y install $(cat $GITHUB_WORKSPACE/openwrt-env)
-          sudo -E apt-get -y install ccache  # 安装ccache缓存工具
+          # 安装修正后的依赖包（无拼写错误、适配22.04）
+          sudo -E apt-get -y install \
+          autoconf automake bash bc bison binutils bzip2 cmake coreutils curl diffutils flex \
+          g++ gcc gettext git gzip libc6-dev libelf-dev libffi-dev libgmp-dev liblzma-dev \
+          libncurses-dev libncursesw5-dev libpcre3-dev libreadline-dev libssl-dev libtool \
+          libudev-dev libxml2-dev llvm lzop make patch perl pkg-config python3 \
+          python3-distutils python3-setuptools rsync sed subversion tar unzip wget xz-utils \
+          zlib1g-dev libclang-dev clang ninja-build ccache
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get -y clean
           sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
@@ -82,14 +88,23 @@ jobs:
           mkdir -p $CCACHE_DIR
           chmod 777 $CCACHE_DIR
 
-      - name: 克隆OpenWRT 24.10.4源码
+      - name: 克隆OpenWRT 24.10.4源码（适配Tag，增加兜底逻辑）
         id: clone
         run: |
-          git clone --depth $CLONE_DEPTH -b $SOURCE_BRANCH $SOURCE_URL workspace/openwrt
+          # 核心修正：适配Tag克隆（而非分支），增加兜底
+          git clone --depth $CLONE_DEPTH --single-branch -b $SOURCE_BRANCH $SOURCE_URL workspace/openwrt || {
+              echo "Direct clone Tag failed, fallback to checkout Tag after clone"
+              git clone --depth $CLONE_DEPTH $SOURCE_URL workspace/openwrt
+              cd workspace/openwrt
+              git checkout tags/$SOURCE_BRANCH -b openwrt-24.10.4
+              cd -
+          }
+          # 输出源码路径
           cd workspace/openwrt
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
+          # 输出工具链输出路径
           mkdir -p $GITHUB_WORKSPACE/output
           cd $GITHUB_WORKSPACE/output
           export TOOLCHAIN_OUTPUT="$(pwd)"
@@ -290,13 +305,19 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           docker image prune -a -f
 
-      - name: 安装编译依赖
+      - name: 安装编译依赖（修复包名错误）
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get -qq -y upgrade
-          sudo -E apt-get -y install $(cat $GITHUB_WORKSPACE/openwrt-env)
-          sudo -E apt-get -y install ccache
+          # 安装修正后的依赖包（无拼写错误、适配22.04）
+          sudo -E apt-get -y install \
+          autoconf automake bash bc bison binutils bzip2 cmake coreutils curl diffutils flex \
+          g++ gcc gettext git gzip libc6-dev libelf-dev libffi-dev libgmp-dev liblzma-dev \
+          libncurses-dev libncursesw5-dev libpcre3-dev libreadline-dev libssl-dev libtool \
+          libudev-dev libxml2-dev llvm lzop make patch perl pkg-config python3 \
+          python3-distutils python3-setuptools rsync sed subversion tar unzip wget xz-utils \
+          zlib1g-dev libclang-dev clang ninja-build ccache
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get -y clean
           sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
@@ -455,7 +476,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES: |
             OpenWRT 24.10.4 x86_64 固件（${{ env.BUILD_DATE }}）
-            核心插件：open-vm-tools、iKoolProxy（ilxp仓库）、DDNS、msd_lite、Passwall、BBR、Cake/FQ、Argon主题
+            核心插件：open-vm-tools、iKoolProxy（ilxp仓库）、DDNS、msd_lite、Passwall2、BBR、Cake/FQ、Argon主题
             语言：默认中文
             固件格式：ISO/IMG/VMDK（适配VMware/Proxmox/物理机）
         run: |
