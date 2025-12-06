@@ -10,19 +10,19 @@ cp -f feeds.conf.default feeds.conf.default.bak
 # 移除所有旧的自定义Feeds（避免冲突）
 sed -i '/kenzo\|small\|argon\|ikoolproxy/d' feeds.conf.default
 
-# ====================== 适配v24.10.4：克隆对应分支的Feeds ======================
-# 1. kenzo包（严格适配openwrt-24.10分支，匹配v24.10.4）
+# ====================== 适配v24.10.4：克隆对应分支的Feeds（修正分支名） ======================
+# 1. kenzo包（正确分支名：24.10，匹配v24.10.4）
 mkdir -p feeds/kenzo
-git clone --depth 1 --single-branch -b openwrt-24.10 https://github.com/kenzok8/openwrt-packages.git feeds/kenzo || {
+git clone --depth 1 --single-branch -b 24.10 https://github.com/kenzok8/openwrt-packages.git feeds/kenzo || {
     echo "拉取kenzo Feeds失败，重试..."
-    rm -rf feeds/kenzo && git clone --depth 1 --single-branch -b openwrt-24.10 https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
+    rm -rf feeds/kenzo && git clone --depth 1 --single-branch -b 24.10 https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 }
 
-# 2. small包（openwrt-24.10分支，适配v24.10.4）
+# 2. small包（正确分支名：24.10，适配v24.10.4）
 mkdir -p feeds/small
-git clone --depth 1 --single-branch -b openwrt-24.10 https://github.com/kenzok8/small.git feeds/small || {
+git clone --depth 1 --single-branch -b 24.10 https://github.com/kenzok8/small.git feeds/small || {
     echo "拉取small Feeds失败，重试..."
-    rm -rf feeds/small && git clone --depth 1 --single-branch -b openwrt-24.10 https://github.com/kenzok8/small.git feeds/small
+    rm -rf feeds/small && git clone --depth 1 --single-branch -b 24.10 https://github.com/kenzok8/small.git feeds/small
 }
 
 # 3. Argon主题（适配v24.10.4的最新版本）
