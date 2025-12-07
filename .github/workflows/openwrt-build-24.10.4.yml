@@ -78,7 +78,7 @@ jobs:
           libncurses-dev libncursesw5-dev libpcre3-dev libreadline-dev libssl-dev libtool \
           libudev-dev libxml2-dev llvm lzop make patch perl pkg-config python3 \
           python3-distutils python3-setuptools rsync sed subversion tar unzip wget xz-utils \
-          zlib1g-dev libclang-dev clang ninja-build ccache
+          zlib1g-dev libclang-dev clang ninja-build ccache golang-go  # 新增Go语言工具链
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get -y clean
           sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
