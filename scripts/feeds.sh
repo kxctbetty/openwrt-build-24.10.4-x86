@@ -6,7 +6,7 @@ set -x  # 开启执行日志，方便排查
 OPENWRT_ROOT_PATH="${OPENWRT_ROOT_PATH:-$(pwd)}"
 cd "$OPENWRT_ROOT_PATH" || { echo "根目录不存在，退出！"; exit 1; }
 
-# ===================== 核心优化：多镜像+排除冲突包 =====================
+# ===================== 核心优化：多镜像+提前删除冲突包 =====================
 # 定义国内镜像源列表（优先级：清华→中科大→阿里云）
 PACKAGES_MIRRORS=(
   "https://mirrors.tuna.tsinghua.edu.cn/openwrt/packages.git;openwrt-24.10"
@@ -31,7 +31,7 @@ src-git kenzo https://github.com/kenzok8/openwrt-packages.git;master
 src-git small https://github.com/kenzok8/small.git;master
 EOF
 
-# 3. Feeds拉取（带镜像自动切换+3次重试）
+# 3. Feeds拉取（调整顺序：先拉源码→删冲突包→再解析）
 function update_feeds_with_mirror() {
   local mirror_index=$1
   # 切换镜像源
@@ -41,7 +41,15 @@ function update_feeds_with_mirror() {
   
   # 拉取Feeds（3次重试）
   for retry in {1..3}; do
-    ./scripts/feeds update -a -f && return 0  # 拉取成功则退出函数
+    # 步骤1：先拉取所有源的源码（不解析）
+    ./scripts/feeds fetch -a
+    # 步骤2：删除small源里的v2ray/xray冲突包（解析前删除）
+    if [ -d "feeds/small" ]; then
+      rm -rf feeds/small/v2ray* feeds/small/xray*
+      echo -e "\n✅ 已删除small源里的v2ray/xray冲突包（解析前删除）"
+    fi
+    # 步骤3：再解析包信息（此时冲突包已被删除，不会报错）
+    ./scripts/feeds update -a -f && return 0  # 成功则退出
     echo "⚠️ 镜像源拉取失败，第 $retry/3 次重试..."
     sleep 10
     rm -rf feeds/  # 重试前清空缓存
@@ -52,7 +60,7 @@ function update_feeds_with_mirror() {
 # 依次尝试镜像源，直到成功
 for mirror_idx in 0 1 2; do
   if update_feeds_with_mirror $mirror_idx; then
-    echo -e "\n✅ 镜像源 ${PACKAGES_MIRRORS[$mirror_idx]} 拉取成功！"
+    echo -e "\n✅ 镜像源 ${PACKAGES_MIRRORS[$mirror_idx]} 拉取+解析成功！"
     break
   fi
   if [ $mirror_idx -eq 2 ]; then
@@ -60,10 +68,6 @@ for mirror_idx in 0 1 2; do
     exit 1
   fi
 done
-
-# 核心修复：删除small源里的v2ray/xray冲突包（避免Makefile错误）
-rm -rf feeds/small/v2ray* feeds/small/xray*
-echo -e "\n✅ 已删除small源里的v2ray/xray冲突包，解决Makefile错误"
 
 # 4. 安装Feeds（强制安装核心包）
 ./scripts/feeds install -a
