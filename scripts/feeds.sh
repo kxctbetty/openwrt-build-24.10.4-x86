@@ -51,8 +51,14 @@ fi
 
 # 6. 精准安装核心插件（确保v24.10.4兼容）
 # 拆分：passwall2等从kenzo装，xray-core从官方packages装（解决兼容问题）
+# 新增：清理xray-core旧源码缓存，避免适配问题
+rm -rf feeds/packages/net/xray-core
+# 新增：重新拉取packages源的xray-core（确保源码最新）
+./scripts/feeds update packages -f
+# 核心修改：安装xray-core+依赖的Go库（解决配置阶段失败）
+./scripts/feeds install -p packages xray-core golang golang-golang-x-net golang-golang-x-sys
+# 保留原有插件安装（仅动xray-core相关行）
 ./scripts/feeds install -p kenzo luci-app-passwall2 v2ray-core sing-box msd_lite luci-app-msd_lite
-./scripts/feeds install -p packages xray-core  # 官方适配版xray-core
 ./scripts/feeds install -p base ddns-scripts luci-app-ddns open-vm-tools
 ./scripts/feeds install -p argon luci-theme-argon luci-app-argon-config
 ./scripts/feeds install -p luci luci-i18n-base-zh-cn
@@ -65,4 +71,34 @@ for feed in kenzo small argon; do
     fi
 done
 
+# 8. 新增：校验xray-core及依赖是否安装成功
+echo -e "\n🔍 开始校验xray-core及依赖安装状态..."
+# 定义需要校验的包列表
+REQUIRED_PACKAGES=("xray-core" "golang" "golang-golang-x-net" "golang-golang-x-sys")
+INSTALL_FAILED=0
+
+for pkg in "${REQUIRED_PACKAGES[@]}"; do
+    if ./scripts/feeds list -i | grep -q "^$pkg"; then
+        echo -e "✅ $pkg 安装成功"
+    else
+        echo -e "❌ $pkg 安装失败"
+        INSTALL_FAILED=1
+    fi
+done
+
+# 校验xray-core源码目录是否存在
+if [ -d "feeds/packages/net/xray-core" ]; then
+    echo -e "✅ xray-core源码目录存在"
+else
+    echo -e "❌ xray-core源码目录缺失"
+    INSTALL_FAILED=1
+fi
+
+# 校验失败则退出，避免后续编译报错
+if [ $INSTALL_FAILED -eq 1 ]; then
+    echo -e "\n❌ xray-core或其依赖安装失败，编译终止！"
+    exit 1
+fi
+
 echo -e "\n✅ Feeds拉取完成！xray-core使用官方适配版，所有包均兼容OpenWRT v24.10.4～"
+echo -e "✅ xray-core及依赖校验通过，可正常编译～"
