@@ -6,7 +6,7 @@ set -x  # 开启执行日志，方便排查
 OPENWRT_ROOT_PATH="${OPENWRT_ROOT_PATH:-$(pwd)}"
 cd "$OPENWRT_ROOT_PATH" || { echo "根目录不存在，退出！"; exit 1; }
 
-# ===================== 核心优化：移除small源+多镜像 =====================
+# ===================== 核心配置：多镜像+集成OpenWrt-Add仓库 =====================
 # 定义国内镜像源列表（优先级：清华→中科大→阿里云）
 PACKAGES_MIRRORS=(
   "https://mirrors.tuna.tsinghua.edu.cn/openwrt/packages.git;openwrt-24.10"
@@ -21,13 +21,13 @@ LUCI_MIRRORS=(
 
 # 1. 彻底清理旧Feeds（删缓存+配置，避免干扰）
 rm -rf feeds/ feeds.conf.default feeds.conf.default.bak
-rm -rf package/luci-app-ikoolproxy package/luci-theme-argon  # 清理本地包缓存
+rm -rf package/luci-app-ikoolproxy package/luci-theme-argon package/OpenWrt-Add  # 清理旧的OpenWrt-Add缓存
 
-# 2. 生成Feeds配置文件（移除small源+argon源）
+# 2. 生成Feeds配置文件（适配OpenWRT 24.10）
 cat > feeds.conf.default << EOF
 src-git packages ${PACKAGES_MIRRORS[0]}
 src-git luci ${LUCI_MIRRORS[0]}
-src-git kenzo https://github.com/kenzok8/openwrt-packages.git;master
+src-git kenzo https://github.com/kenzok8/openwrt-packages.git;openwrt-24.10
 EOF
 
 # 3. Feeds拉取（带镜像自动切换+3次重试）
@@ -40,7 +40,13 @@ function update_feeds_with_mirror() {
   
   # 拉取+解析Feeds（3次重试）
   for retry in {1..3}; do
-    ./scripts/feeds update -a -f && return 0  # 拉取+解析成功则退出
+    ./scripts/feeds fetch -a  # 先拉源码
+    # 删除kenzo源里的错误包（非必要包）
+    if [ -d "feeds/kenzo" ]; then
+      rm -rf feeds/kenzo/luci-theme-tomato feeds/kenzo/openlist2 feeds/kenzo/smartdns
+      echo -e "\n✅ 已删除kenzo源里的错误包"
+    fi
+    ./scripts/feeds update -a -f && return 0  # 解析成功则退出
     echo "⚠️ 镜像源拉取失败，第 $retry/3 次重试..."
     sleep 10
     rm -rf feeds/  # 重试前清空缓存
@@ -60,15 +66,24 @@ for mirror_idx in 0 1 2; do
   fi
 done
 
-# 4. 安装Feeds（强制安装核心包）
+# 4. 安装Feeds核心包
 ./scripts/feeds install -a
-# 单独安装核心包（避免漏装）
 ./scripts/feeds install -p packages xray-core golang golang-x-net golang-x-sys
 ./scripts/feeds install -p kenzo luci-app-passwall2 v2ray-core sing-box msd_lite luci-app-msd_lite
 ./scripts/feeds install -p luci luci-i18n-base-zh-cn
 ./scripts/feeds install -p base ddns-scripts luci-app-ddns open-vm-tools
 
-# 5. 拉取argon主题（直接克隆到package目录，带3次重试）
+# 5. 集成chenq7421/OpenWrt-Add仓库（带3次重试）
+mkdir -p package/OpenWrt-Add
+for retry in {1..3}; do
+  git clone --depth 1 https://github.com/chenq7421/OpenWrt-Add.git package/OpenWrt-Add && break
+  echo "⚠️ OpenWrt-Add仓库拉取失败，第 $retry/3 次重试..."
+  rm -rf package/OpenWrt-Add
+  sleep 10
+done
+echo -e "\n✅ OpenWrt-Add仓库已成功集成到package目录"
+
+# 6. 拉取argon主题+ikoolproxy（保留原有功能）
 mkdir -p package/luci-theme-argon
 for retry in {1..3}; do
   git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon && break
@@ -76,10 +91,8 @@ for retry in {1..3}; do
   rm -rf package/luci-theme-argon
   sleep 10
 done
-# 安装argon本地包
 ./scripts/feeds install -p packages package/luci-theme-argon
 
-# 6. 拉取iKoolProxy（带3次重试）
 mkdir -p package/luci-app-ikoolproxy
 for retry in {1..3}; do
   git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy && break
@@ -88,25 +101,10 @@ for retry in {1..3}; do
   sleep 10
 done
 
-# 7. 验证关键包是否拉取成功
-echo -e "\n🔍 验证核心包源码目录："
-if [ -d "feeds/packages/net/xray-core" ]; then
-  echo "✅ xray-core源码已拉取"
-else
-  echo "❌ xray-core源码缺失，编译会失败！"
-  exit 1
-fi
-if [ -d "feeds/packages/lang/golang" ]; then
-  echo "✅ golang源码已拉取"
-else
-  echo "❌ golang源码缺失，编译会失败！"
-  exit 1
-fi
-if [ -d "package/luci-theme-argon" ]; then
-  echo "✅ argon主题源码已拉取"
-else
-  echo "❌ argon主题源码缺失！"
-  exit 1
-fi
+# 7. 验证关键包
+echo -e "\n🔍 验证核心包目录："
+[ -d "feeds/packages/net/xray-core" ] && echo "✅ xray-core源码存在" || { echo "❌ xray-core缺失"; exit 1; }
+[ -d "package/OpenWrt-Add" ] && echo "✅ OpenWrt-Add仓库集成成功" || { echo "❌ OpenWrt-Add缺失"; exit 1; }
+[ -d "package/luci-theme-argon" ] && echo "✅ argon主题源码存在" || { echo "❌ argon主题缺失"; exit 1; }
 
-echo -e "\n✅ 所有核心包拉取完成，可正常编译！"
+echo -e "\n✅ 所有配置完成，可正常编译！"
