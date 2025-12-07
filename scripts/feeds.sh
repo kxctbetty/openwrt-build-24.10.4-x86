@@ -55,9 +55,9 @@ fi
 rm -rf feeds/packages/net/xray-core
 # 新增：重新拉取packages源的xray-core（确保源码最新）
 ./scripts/feeds update packages -f
-# 核心修改：安装xray-core+依赖的Go库（解决配置阶段失败）
-./scripts/feeds install -p packages xray-core golang golang-golang-x-net golang-golang-x-sys
-# 保留原有插件安装（仅动xray-core相关行）
+# 核心修正：修正Go依赖包名（官方源包名是golang-x-net/golang-x-sys）
+./scripts/feeds install -p packages xray-core golang golang-x-net golang-x-sys
+# 保留原有插件安装
 ./scripts/feeds install -p kenzo luci-app-passwall2 v2ray-core sing-box msd_lite luci-app-msd_lite
 ./scripts/feeds install -p base ddns-scripts luci-app-ddns open-vm-tools
 ./scripts/feeds install -p argon luci-theme-argon luci-app-argon-config
@@ -71,14 +71,14 @@ for feed in kenzo small argon; do
     fi
 done
 
-# 8. 新增：校验xray-core及依赖是否安装成功
+# 8. 修正：校验xray-core及依赖是否安装成功（修复命令参数+包名）
 echo -e "\n🔍 开始校验xray-core及依赖安装状态..."
-# 定义需要校验的包列表
-REQUIRED_PACKAGES=("xray-core" "golang" "golang-golang-x-net" "golang-golang-x-sys")
+# 定义正确的需要校验的包列表
+REQUIRED_PACKAGES=("xray-core" "golang" "golang-x-net" "golang-x-sys")
 INSTALL_FAILED=0
 
 for pkg in "${REQUIRED_PACKAGES[@]}"; do
-    if ./scripts/feeds list -i | grep -q "^$pkg"; then
+    if ./scripts/feeds installed | grep -q "^$pkg"; then
         echo -e "✅ $pkg 安装成功"
     else
         echo -e "❌ $pkg 安装失败"
