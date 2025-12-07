@@ -10,31 +10,28 @@ cp -f feeds.conf.default feeds.conf.default.bak
 sed -i '/kenzo\|small\|argon\|ikoolproxy/d' feeds.conf.default
 
 # 2. 拉取kenzok8仓库（master分支，稳定兼容v24.10.4）
-## 拉取kenzo主包
+## 拉取kenzo主包（去掉--depth 1，确保子目录完整拉取）
 mkdir -p feeds/kenzo
-if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo; then
+if ! git clone --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo; then
     echo "首次拉取kenzo失败，重试1次..."
     rm -rf feeds/kenzo
-    git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
+    git clone --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 fi
 
-## 新增：确保xray-core目录存在并降级到v1.8.0（修复目录不存在问题）
-# 1. 强制创建目录（如果不存在）
-mkdir -p feeds/kenzo/net/xray-core
-# 2. 进入目录
-cd feeds/kenzo/net/xray-core
-# 3. 如果目录是空的，从kenzok8仓库拉取xray-core文件
-if [ ! -f "Makefile" ]; then
-    echo "xray-core目录为空，拉取kenzok8适配版文件..."
-    git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git .tmp
-    cp -rf .tmp/net/xray-core/* .  # 复制xray-core文件到当前目录
-    rm -rf .tmp  # 清理临时文件
+## 新增：确保xray-core目录存在并降级到v1.8.0（修复路径不存在问题）
+# 1. 检查xray-core目录是否存在（利用已克隆的feeds/kenzo）
+if [ ! -d "feeds/kenzo/net/xray-core" ]; then
+    echo "xray-core目录缺失，重新拉取kenzo主包..."
+    rm -rf feeds/kenzo
+    git clone --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 fi
-# 4. 降级到兼容v24.10.4的v1.8.0版本
+# 2. 进入xray-core目录
+cd feeds/kenzo/net/xray-core
+# 3. 降级到兼容v24.10.4的v1.8.0版本
 git reset --hard
-git fetch --depth 1 origin
-git checkout $(git tag -l | grep "v1.8.0" | head -1)
-# 5. 回到OpenWRT根目录
+git fetch origin  # 拉取仓库标签（确保能找到v1.8.0）
+git checkout $(git tag -l | grep "v1.8.0" | head -1)  # 切换到兼容版本
+# 4. 回到OpenWRT源码根目录
 cd $OPENWRT_ROOT_PATH
 
 ## 拉取kenzo small包（依赖补充）
