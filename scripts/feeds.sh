@@ -1,104 +1,98 @@
 #!/bin/bash
 set -e
+set -x  # 开启执行日志，方便排查
 
-# 定位OpenWRT源码根目录（适配Actions环境）
+# 定位OpenWRT源码根目录
 OPENWRT_ROOT_PATH="${OPENWRT_ROOT_PATH:-$(pwd)}"
-cd "$OPENWRT_ROOT_PATH" || { echo "OpenWRT根目录不存在，退出！"; exit 1; }
+cd "$OPENWRT_ROOT_PATH" || { echo "根目录不存在，退出！"; exit 1; }
 
-# 1. 备份并清理旧Feeds配置（避免冲突）
-cp -f feeds.conf.default feeds.conf.default.bak
-# 清理已有的kenzo/small/argon/ikoolproxy/packages源（避免重复）
-sed -i '/kenzo\|small\|argon\|ikoolproxy\|packages/d' feeds.conf.default
-# 添加OpenWRT官方packages源（指定openwrt-24.10分支，适配当前固件版本）
-echo "src-git packages https://github.com/openwrt/packages.git;openwrt-24.10" >> feeds.conf.default
+# ===================== 核心优化：多镜像源配置（失败自动切换） =====================
+# 定义国内镜像源列表（优先级：清华→中科大→阿里云）
+PACKAGES_MIRRORS=(
+  "https://mirrors.tuna.tsinghua.edu.cn/openwrt/packages.git;openwrt-24.10"
+  "https://mirrors.ustc.edu.cn/openwrt/packages.git;openwrt-24.10"
+  "https://mirrors.aliyun.com/openwrt/packages.git;openwrt-24.10"
+)
+LUCI_MIRRORS=(
+  "https://mirrors.tuna.tsinghua.edu.cn/openwrt/luci.git;openwrt-24.10"
+  "https://mirrors.ustc.edu.cn/openwrt/luci.git;openwrt-24.10"
+  "https://mirrors.aliyun.com/openwrt/luci.git;openwrt-24.10"
+)
 
-# 2. 拉取kenzok8仓库（master分支，稳定兼容v24.10.4）
-## 拉取kenzo主包（保留passwall2等插件）
-mkdir -p feeds/kenzo
-if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo; then
-    echo "首次拉取kenzo失败，重试1次..."
-    rm -rf feeds/kenzo
-    git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
-fi
+# 1. 彻底清理旧Feeds（删缓存+配置，避免干扰）
+rm -rf feeds/ feeds.conf.default feeds.conf.default.bak
+rm -rf package/luci-app-ikoolproxy  # 清理本地包缓存
 
-## 拉取kenzo small包（依赖补充）
-mkdir -p feeds/small
-if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/small.git feeds/small; then
-    echo "首次拉取small失败，重试1次..."
-    rm -rf feeds/small
-    git clone --depth 1 --single-branch -b master https://github.com/kenzok8/small.git feeds/small
-fi
+# 2. 生成Feeds配置文件（先尝试第一个镜像，失败自动切换）
+cat > feeds.conf.default << EOF
+src-git packages ${PACKAGES_MIRRORS[0]}
+src-git luci ${LUCI_MIRRORS[0]}
+src-git kenzo https://github.com/kenzok8/openwrt-packages.git;master
+src-git small https://github.com/kenzok8/small.git;master
+src-git argon https://github.com/jerrykuku/luci-theme-argon.git;master
+EOF
 
-# 3. 拉取Argon主题（适配v24.10.4）
-mkdir -p feeds/argon
-if ! git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git feeds/argon; then
-    echo "首次拉取Argon失败，重试1次..."
-    rm -rf feeds/argon
-    git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git feeds/argon
-fi
+# 3. Feeds拉取（带镜像自动切换+3次重试）
+function update_feeds_with_mirror() {
+  local mirror_index=$1
+  # 切换镜像源
+  sed -i "s|src-git packages .*|src-git packages ${PACKAGES_MIRRORS[$mirror_index]}|g" feeds.conf.default
+  sed -i "s|src-git luci .*|src-git luci ${LUCI_MIRRORS[$mirror_index]}|g" feeds.conf.default
+  echo -e "\n🔍 尝试第 $((mirror_index+1)) 个镜像源：${PACKAGES_MIRRORS[$mirror_index]}"
+  
+  # 拉取Feeds（3次重试）
+  for retry in {1..3}; do
+    ./scripts/feeds update -a -f && return 0  # 拉取成功则退出函数
+    echo "⚠️ 镜像源拉取失败，第 $retry/3 次重试..."
+    sleep 10
+    rm -rf feeds/  # 重试前清空缓存
+  done
+  return 1  # 该镜像源所有重试都失败
+}
 
-# 4. 拉取iKoolProxy（本地包，更稳定）
-mkdir -p package/luci-app-ikoolproxy
-if ! git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy; then
-    echo "首次拉取iKoolProxy失败，重试1次..."
-    rm -rf package/luci-app-ikoolproxy
-    git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy
-fi
+# 依次尝试镜像源，直到成功
+for mirror_idx in 0 1 2; do
+  if update_feeds_with_mirror $mirror_idx; then
+    echo -e "\n✅ 镜像源 ${PACKAGES_MIRRORS[$mirror_idx]} 拉取成功！"
+    break
+  fi
+  if [ $mirror_idx -eq 2 ]; then
+    echo -e "\n❌ 所有镜像源都拉取失败，退出！"
+    exit 1
+  fi
+done
 
-# 5. 更新+安装Feeds（强制刷新，包含官方packages源）
-./scripts/feeds update -a -f
+# 4. 安装Feeds（强制安装核心包，确保xray-core/golang装上）
 ./scripts/feeds install -a
-
-# 6. 精准安装核心插件（确保v24.10.4兼容）
-# 拆分：passwall2等从kenzo装，xray-core从官方packages装（解决兼容问题）
-# 新增：清理xray-core旧源码缓存，避免适配问题
-rm -rf feeds/packages/net/xray-core
-# 新增：重新拉取packages源的xray-core（确保源码最新）
-./scripts/feeds update packages -f
-# 核心修正：修正Go依赖包名（官方源包名是golang-x-net/golang-x-sys）
+# 单独安装核心包（避免漏装）
 ./scripts/feeds install -p packages xray-core golang golang-x-net golang-x-sys
-# 保留原有插件安装
 ./scripts/feeds install -p kenzo luci-app-passwall2 v2ray-core sing-box msd_lite luci-app-msd_lite
-./scripts/feeds install -p base ddns-scripts luci-app-ddns open-vm-tools
 ./scripts/feeds install -p argon luci-theme-argon luci-app-argon-config
 ./scripts/feeds install -p luci luci-i18n-base-zh-cn
+./scripts/feeds install -p base ddns-scripts luci-app-ddns open-vm-tools
 
-# 7. 安装中文语言包（提升易用性）
-for feed in kenzo small argon; do
-    if [ -d "feeds/$feed" ]; then
-        zh_pkgs=$(ls feeds/$feed/luci-i18n-*-zh-cn 2>/dev/null | awk -F '/' '{print $NF}')
-        [ -n "$zh_pkgs" ] && ./scripts/feeds install -p "$feed" $zh_pkgs
-    fi
+# 5. 拉取iKoolProxy（带3次重试）
+mkdir -p package/luci-app-ikoolproxy
+for retry in {1..3}; do
+  git clone --depth 1 https://github.com/ilxp/luci-app-ikoolproxy.git package/luci-app-ikoolproxy && break
+  echo "⚠️ iKoolProxy拉取失败，第 $retry/3 次重试..."
+  rm -rf package/luci-app-ikoolproxy
+  sleep 10
 done
 
-# 8. 修正：校验xray-core及依赖是否安装成功（修复命令参数+包名）
-echo -e "\n🔍 开始校验xray-core及依赖安装状态..."
-# 定义正确的需要校验的包列表
-REQUIRED_PACKAGES=("xray-core" "golang" "golang-x-net" "golang-x-sys")
-INSTALL_FAILED=0
-
-for pkg in "${REQUIRED_PACKAGES[@]}"; do
-    if ./scripts/feeds installed | grep -q "^$pkg"; then
-        echo -e "✅ $pkg 安装成功"
-    else
-        echo -e "❌ $pkg 安装失败"
-        INSTALL_FAILED=1
-    fi
-done
-
-# 校验xray-core源码目录是否存在
+# 6. 验证关键包是否拉取成功（提前排查）
+echo -e "\n🔍 验证核心包源码目录："
 if [ -d "feeds/packages/net/xray-core" ]; then
-    echo -e "✅ xray-core源码目录存在"
+  echo "✅ xray-core源码已拉取"
 else
-    echo -e "❌ xray-core源码目录缺失"
-    INSTALL_FAILED=1
+  echo "❌ xray-core源码缺失，编译会失败！"
+  exit 1
+fi
+if [ -d "feeds/packages/lang/golang" ]; then
+  echo "✅ golang源码已拉取"
+else
+  echo "❌ golang源码缺失，编译会失败！"
+  exit 1
 fi
 
-# 校验失败则退出，避免后续编译报错
-if [ $INSTALL_FAILED -eq 1 ]; then
-    echo -e "\n❌ xray-core或其依赖安装失败，编译终止！"
-    exit 1
-fi
-
-echo -e "\n✅ Feeds拉取完成！xray-core使用官方适配版，所有包均兼容OpenWRT v24.10.4～"
-echo -e "✅ xray-core及依赖校验通过，可正常编译～"
+echo -e "\n✅ 所有核心包拉取完成，可正常编译！"
