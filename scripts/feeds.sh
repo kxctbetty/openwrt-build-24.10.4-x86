@@ -7,8 +7,9 @@ cd "$OPENWRT_ROOT_PATH" || { echo "OpenWRT根目录不存在，退出！"; exit 
 
 # 1. 备份并清理旧Feeds配置（避免冲突）
 cp -f feeds.conf.default feeds.conf.default.bak
-sed -i '/kenzo\|small\|argon\|ikoolproxy/d' feeds.conf.default
-# 新增：添加OpenWRT官方packages源（拉取适配v24.10.4的xray-core）
+# 清理已有的kenzo/small/argon/ikoolproxy/packages源（避免重复）
+sed -i '/kenzo\|small\|argon\|ikoolproxy\|packages/d' feeds.conf.default
+# 添加OpenWRT官方packages源（指定openwrt-24.10分支，适配当前固件版本）
 echo "src-git packages https://github.com/openwrt/packages.git;openwrt-24.10" >> feeds.conf.default
 
 # 2. 拉取kenzok8仓库（master分支，稳定兼容v24.10.4）
