@@ -18,12 +18,24 @@ if ! git clone --depth 1 --single-branch -b master https://github.com/kenzok8/op
     git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git feeds/kenzo
 fi
 
-## 新增：降级kenzo里的xray-core到v1.8.0（OpenWRT适配版，兼容v24.10.4）
+## 新增：确保xray-core目录存在并降级到v1.8.0（修复目录不存在问题）
+# 1. 强制创建目录（如果不存在）
+mkdir -p feeds/kenzo/net/xray-core
+# 2. 进入目录
 cd feeds/kenzo/net/xray-core
-git reset --hard  # 重置本地修改
-git fetch --depth 1 origin  # 拉取仓库标签
-git checkout $(git tag -l | grep "v1.8.0" | head -1)  # 切换到兼容版本
-cd $OPENWRT_ROOT_PATH  # 回到OpenWRT源码根目录
+# 3. 如果目录是空的，从kenzok8仓库拉取xray-core文件
+if [ ! -f "Makefile" ]; then
+    echo "xray-core目录为空，拉取kenzok8适配版文件..."
+    git clone --depth 1 --single-branch -b master https://github.com/kenzok8/openwrt-packages.git .tmp
+    cp -rf .tmp/net/xray-core/* .  # 复制xray-core文件到当前目录
+    rm -rf .tmp  # 清理临时文件
+fi
+# 4. 降级到兼容v24.10.4的v1.8.0版本
+git reset --hard
+git fetch --depth 1 origin
+git checkout $(git tag -l | grep "v1.8.0" | head -1)
+# 5. 回到OpenWRT根目录
+cd $OPENWRT_ROOT_PATH
 
 ## 拉取kenzo small包（依赖补充）
 mkdir -p feeds/small
