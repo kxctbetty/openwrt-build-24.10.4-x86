@@ -6,7 +6,7 @@ set -x  # 开启执行日志，方便排查
 OPENWRT_ROOT_PATH="${OPENWRT_ROOT_PATH:-$(pwd)}"
 cd "$OPENWRT_ROOT_PATH" || { echo "根目录不存在，退出！"; exit 1; }
 
-# ===================== 核心优化：多镜像源配置（失败自动切换） =====================
+# ===================== 核心优化：多镜像+排除冲突包 =====================
 # 定义国内镜像源列表（优先级：清华→中科大→阿里云）
 PACKAGES_MIRRORS=(
   "https://mirrors.tuna.tsinghua.edu.cn/openwrt/packages.git;openwrt-24.10"
@@ -21,9 +21,9 @@ LUCI_MIRRORS=(
 
 # 1. 彻底清理旧Feeds（删缓存+配置，避免干扰）
 rm -rf feeds/ feeds.conf.default feeds.conf.default.bak
-rm -rf package/luci-app-ikoolproxy package/luci-theme-argon  # 新增清理argon缓存
+rm -rf package/luci-app-ikoolproxy package/luci-theme-argon  # 清理本地包缓存
 
-# 2. 生成Feeds配置文件（移除argon的src-git配置）
+# 2. 生成Feeds配置文件（移除argon源）
 cat > feeds.conf.default << EOF
 src-git packages ${PACKAGES_MIRRORS[0]}
 src-git luci ${LUCI_MIRRORS[0]}
@@ -61,7 +61,11 @@ for mirror_idx in 0 1 2; do
   fi
 done
 
-# 4. 安装Feeds（强制安装核心包，确保xray-core/golang装上）
+# 核心修复：删除small源里的v2ray/xray冲突包（避免Makefile错误）
+rm -rf feeds/small/v2ray* feeds/small/xray*
+echo -e "\n✅ 已删除small源里的v2ray/xray冲突包，解决Makefile错误"
+
+# 4. 安装Feeds（强制安装核心包）
 ./scripts/feeds install -a
 # 单独安装核心包（避免漏装）
 ./scripts/feeds install -p packages xray-core golang golang-x-net golang-x-sys
@@ -89,7 +93,7 @@ for retry in {1..3}; do
   sleep 10
 done
 
-# 7. 验证关键包是否拉取成功（提前排查）
+# 7. 验证关键包是否拉取成功
 echo -e "\n🔍 验证核心包源码目录："
 if [ -d "feeds/packages/net/xray-core" ]; then
   echo "✅ xray-core源码已拉取"
